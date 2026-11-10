@@ -20,7 +20,7 @@ func resizedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutabl
               let window = Window.get(byNativeId: nativeWindowId, pid: pid),
               try await isManipulatedWithMouse(window)
         else {
-            scheduleCancellableCompleteRefreshSession(.ax(notif))
+            scheduleCancellableCompleteRefreshSession(.ax(notif), coalesceBurst: true)
             return
         }
         resizeWithMouseTask?.cancel()

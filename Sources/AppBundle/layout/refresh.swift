@@ -3,14 +3,19 @@ import Common
 
 @MainActor
 private var activeRefreshTask: Task<(), any Error>? = nil
+private let burstCoalescingDelay: Duration = .milliseconds(20)
 
 @MainActor
 func scheduleCancellableCompleteRefreshSession(
     _ event: RefreshSessionEvent,
     optimisticallyPreLayoutWorkspaces: Bool = false,
+    coalesceBurst: Bool = false,
 ) {
     activeRefreshTask?.cancel()
     activeRefreshTask = Task.startUnstructured { @MainActor in
+        // Events that come in bursts (e.g. every window that we move during workspace switch reports that it was moved)
+        // would otherwise start a session per event, only to cancel it on the next event several milliseconds later
+        if coalesceBurst { try await Task.sleep(for: burstCoalescingDelay) }
         try checkCancellation()
         await runHeavyCompleteRefreshSession(
             event,
