@@ -16,6 +16,10 @@ final class MacApp: AbstractApp {
     var lastFocusedNativeWindowOpaqueId: OpaqueWindowId? = nil
     private var thread: Thread?
     private var setFrameJobs: [OpaqueWindowId: RunLoopJob] = [:]
+    // Performance optimization. The last frame that we asked the window to take. Allows to skip AX requests if the
+    // window is asked to take the same frame again (which is what happens for the most of the windows on every layout)
+    // The cache must be invalidated every time when the window might have changed its frame without us asking
+    private var lastRequestedAxFrames: [OpaqueWindowId: RequestedAxFrame] = [:]
     // Never pruned: while the screen is locked, AX reports windows as gone, and closedWindowsCache matches
     // the windows re-detected after unlock by their OpaqueWindowId
     // todo: start prunning after we get rid of closedWindowsCache
@@ -115,6 +119,7 @@ final class MacApp: AbstractApp {
     func closeAndUnregisterAxWindow(_ windowId: OpaqueWindowId) {
         if serverArgs.isReadOnly { return }
         setFrameJobs.removeValue(forKey: windowId)?.cancel()
+        lastRequestedAxFrames.removeValue(forKey: windowId)
         guard let nativeWindowId = windowIdMapping.forward[windowId] else { return }
         _ = withWindowAsync(windowId, .cancellable) { [windows] window, job in
             guard let closeButton = window.get(Ax.closeButtonAttr) else { return }
@@ -162,19 +167,43 @@ final class MacApp: AbstractApp {
     }
 
     func setAxFrame(_ windowId: OpaqueWindowId, _ topLeft: CGPoint?, _ size: CGSize?) {
+        let frame = RequestedAxFrame(topLeft: topLeft, size: size)
+        if lastRequestedAxFrames[windowId] == frame { return }
+        lastRequestedAxFrames[windowId] = frame
         setFrameJobs.removeValue(forKey: windowId)?.cancel()
-        setFrameJobs[windowId] = withWindowAsync(windowId, .cancellable) { [axApp] window, job in
-            try disableAnimations(app: axApp.threadGuarded, job) {
+        let job = withWindowAsync(windowId, .cancellable) { [axApp, pid] window, job in
+            let isSuccess = try disableAnimations(app: axApp.threadGuarded, job) {
                 try setFrame(window, topLeft, size, job)
             }
+            if !isSuccess {
+                // The window didn't take the frame. Make sure that we retry on the next layout
+                Task.startUnstructured { @MainActor in
+                    guard let app = MacApp.allAppsMap[pid] else { return }
+                    if app.lastRequestedAxFrames[windowId] == frame { app.forgetLastRequestedAxFrame(windowId) }
+                }
+            }
+        }
+        setFrameJobs[windowId] = job
+        if job.isCancelled { lastRequestedAxFrames.removeValue(forKey: windowId) } // The job wasn't even submitted
+    }
+
+    /// Must be called every time when the window might have changed its frame without us asking
+    func forgetLastRequestedAxFrame(_ windowId: OpaqueWindowId) {
+        lastRequestedAxFrames.removeValue(forKey: windowId)
+    }
+
+    @MainActor static func forgetAllLastRequestedAxFrames() {
+        for app in allAppsMap.values {
+            app.lastRequestedAxFrames = [:]
         }
     }
 
     func setAxFrameForTermination(_ windowId: OpaqueWindowId, _ topLeft: CGPoint?, _ size: CGSize?) {
         setFrameJobs.removeValue(forKey: windowId)?.cancel()
+        lastRequestedAxFrames.removeValue(forKey: windowId)
         let semaphore = DispatchSemaphore(value: 0)
         let job = withWindowAsync(windowId, .nonCancellable) { [axApp] window, job in
-            try? disableAnimations(app: axApp.threadGuarded, job) {
+            _ = try? disableAnimations(app: axApp.threadGuarded, job) {
                 try setFrame(window, topLeft, size, job)
             }
             semaphore.signal()
@@ -228,6 +257,7 @@ final class MacApp: AbstractApp {
 
     func setNativeFullscreen(_ windowId: OpaqueWindowId, _ value: Bool) {
         setFrameJobs.removeValue(forKey: windowId)?.cancel()
+        lastRequestedAxFrames.removeValue(forKey: windowId)
         setFrameJobs[windowId] = withWindowAsync(windowId, .cancellable) { window, job in
             window.set(Ax.isFullscreenAttr, value)
         }
@@ -235,6 +265,7 @@ final class MacApp: AbstractApp {
 
     func setNativeMinimized(_ windowId: OpaqueWindowId, _ value: Bool) {
         setFrameJobs.removeValue(forKey: windowId)?.cancel()
+        lastRequestedAxFrames.removeValue(forKey: windowId)
         setFrameJobs[windowId] = withWindowAsync(windowId, .cancellable) { window, job in
             window.set(Ax.minimizedAttr, value)
         }
@@ -368,6 +399,7 @@ final class MacApp: AbstractApp {
                 setFrameJobs.removeValue(forKey: windowId)?.cancel()
             }
         }
+        lastRequestedAxFrames = lastRequestedAxFrames.filter { aliveOrInvisibleMap.keys.contains($0.key) }
         return aliveOrInvisibleMap
     }
 
@@ -393,6 +425,7 @@ final class MacApp: AbstractApp {
             job.cancel()
         }
         setFrameJobs = [:]
+        lastRequestedAxFrames = [:]
         thread?.runInLoopAsync(job: RunLoopJob(.nonCancellable)) { job in CFRunLoopStop(CFRunLoopGetCurrent()) }
         thread = nil // Disallow all future job submissions
     }
@@ -471,14 +504,22 @@ private func getAxRect(window: AXUIElement, job: RunLoopJob) throws -> Rect? {
     return Rect(topLeftX: topLeftCorner.x, topLeftY: topLeftCorner.y, width: size.width, height: size.height)
 }
 
-private func setFrame(_ window: AXUIElement, _ topLeft: CGPoint?, _ size: CGSize?, _ job: RunLoopJob) throws {
+private struct RequestedAxFrame: Equatable, Sendable {
+    let topLeft: CGPoint?
+    let size: CGSize?
+}
+
+/// Returns false if at least one of AX requests failed
+private func setFrame(_ window: AXUIElement, _ topLeft: CGPoint?, _ size: CGSize?, _ job: RunLoopJob) throws -> Bool {
+    var isSuccess = true
     // Set size and then the position. The order is important https://github.com/nikitabobko/AeroSpace/issues/143
     //                                                        https://github.com/nikitabobko/AeroSpace/issues/335
-    if let size { window.set(Ax.sizeAttr, size) }
+    if let size { isSuccess = window.set(Ax.sizeAttr, size) && isSuccess }
     try job.checkCancellation()
-    if let topLeft { window.set(Ax.topLeftCornerAttr, topLeft) } else { return }
+    if let topLeft { isSuccess = window.set(Ax.topLeftCornerAttr, topLeft) && isSuccess } else { return isSuccess }
     try job.checkCancellation()
-    if let size { window.set(Ax.sizeAttr, size) }
+    if let size { isSuccess = window.set(Ax.sizeAttr, size) && isSuccess }
+    return isSuccess
 }
 
 // Some undocumented magic

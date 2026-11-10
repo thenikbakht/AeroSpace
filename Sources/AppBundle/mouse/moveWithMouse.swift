@@ -10,6 +10,11 @@ func movedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutableR
     let pid = ax.pid
     Task.startUnstructured { @MainActor in
         guard let token: RunSessionGuard = .isServerEnabled else { return }
+        // The window frame has changed (either because of us, or because of the user/the app itself)
+        // Either way, the next layout must not assume that the window still has the frame we asked for
+        if let nativeWindowId, let pid, let app = MacApp.allAppsMap[pid], let windowId = app.opaqueWindowId(of: nativeWindowId) {
+            app.forgetLastRequestedAxFrame(windowId)
+        }
         guard let nativeWindowId,
               let pid,
               let window = Window.get(byNativeId: nativeWindowId, pid: pid),

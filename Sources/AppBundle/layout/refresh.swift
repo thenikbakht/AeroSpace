@@ -45,7 +45,11 @@ func runHeavyCompleteRefreshSession(
             updateTrayText()
             SecureInputPanel.shared.refresh()
             try await normalizeLayoutReason()
-            if shouldLayoutWorkspaces { try await layoutWorkspaces() }
+            if shouldLayoutWorkspaces {
+                // The heavy session is the self-healing mechanism: it unconditionally re-applies frames to all windows
+                MacApp.forgetAllLastRequestedAxFrames()
+                try await layoutWorkspaces()
+            }
         }
     }
     switch res {
