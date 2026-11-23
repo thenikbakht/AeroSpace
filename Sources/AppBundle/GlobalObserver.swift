@@ -19,6 +19,15 @@ enum GlobalObserver {
         }
     }
 
+    private static func onScreenParametersChanged(_ notification: Notification) {
+        let notifName = notification.name.rawValue
+        Task.startUnstructured { @MainActor in
+            dropMonitorInfosCache()
+            if !TrayMenuModel.shared.isEnabled { return }
+            scheduleCancellableCompleteRefreshSession(.globalObserver(notifName), coalesceBurst: true)
+        }
+    }
+
     private static func onHideApp(_ notification: Notification) {
         let notifName = notification.name.rawValue
         Task.startUnstructured { @MainActor in
@@ -52,6 +61,7 @@ enum GlobalObserver {
         nc.addObserver(forName: NSWorkspace.didUnhideApplicationNotification, object: nil, queue: .main, using: onNotif)
         nc.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main, using: onNotif)
         nc.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main, using: onNotif)
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: onScreenParametersChanged)
 
         NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { _ in
             guard let token: RunSessionGuard = .isServerEnabled else { return }

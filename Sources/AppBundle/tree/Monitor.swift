@@ -113,7 +113,11 @@ extension MonitorInfo {
 }
 
 @MainActor func gcMonitors() {
-    if pointToMonitor.count != globalUnsortedMonitorInfos.count {
-        rearrangeMonitors()
+    dropMonitorInfosCacheIfScreenFramesChanged()
+    let monitorInfos = globalUnsortedMonitorInfos
+    guard pointToMonitor.count == monitorInfos.count else { return rearrangeMonitors() }
+    for info in monitorInfos {
+        guard let monitor = pointToMonitor[info.rect.topLeftCorner] else { return rearrangeMonitors() }
+        monitor._info = info
     }
 }
