@@ -104,12 +104,27 @@ var mainMonitorInfo: MonitorInfo {
     return LazyMonitorInfo(monitorAppKitNsScreenScreensId: screen.index + 1, isMain: true, screen.value)
 }
 
-var globalUnsortedMonitorInfos: [MonitorInfo] {
-    isUnitTest
-        ? [testMonitorInfo]
-        : NSScreen.screens.enumerated().map { $0.element.toMonitorInfo(monitorAppKitNsScreenScreensId: $0.offset + 1) }
+@MainActor private var monitorInfosCache: (screenFrames: [CGRect], infos: [MonitorInfo])? = nil
+
+@MainActor var globalUnsortedMonitorInfos: [MonitorInfo] {
+    if isUnitTest { return [testMonitorInfo] }
+    if let monitorInfosCache { return monitorInfosCache.infos }
+    let screens = NSScreen.screens
+    let infos = screens.enumerated().map { $0.element.toMonitorInfo(monitorAppKitNsScreenScreensId: $0.offset + 1) }
+    monitorInfosCache = (screens.map(\.frame), infos)
+    return infos
 }
 
-var globalSortedMonitorInfos: [MonitorInfo] {
+@MainActor func dropMonitorInfosCache() {
+    monitorInfosCache = nil
+}
+
+@MainActor func dropMonitorInfosCacheIfScreenFramesChanged() {
+    if monitorInfosCache?.screenFrames != NSScreen.screens.map(\.frame) {
+        monitorInfosCache = nil
+    }
+}
+
+@MainActor var globalSortedMonitorInfos: [MonitorInfo] {
     globalUnsortedMonitorInfos.sortedBy([\.rect.minX, \.rect.minY])
 }

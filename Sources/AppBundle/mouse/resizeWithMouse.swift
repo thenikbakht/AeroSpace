@@ -10,12 +10,15 @@ func resizedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutabl
     let pid = ax.pid
     Task.startUnstructured { @MainActor in
         guard let token: RunSessionGuard = .isServerEnabled else { return }
+        if let nativeWindowId, let pid, let app = MacApp.allAppsMap[pid], let windowId = app.opaqueWindowId(of: nativeWindowId) {
+            app.forgetLastRequestedAxFrame(windowId)
+        }
         guard let nativeWindowId,
               let pid,
               let window = Window.get(byNativeId: nativeWindowId, pid: pid),
               try await isManipulatedWithMouse(window)
         else {
-            scheduleCancellableCompleteRefreshSession(.ax(notif))
+            scheduleCancellableCompleteRefreshSession(.ax(notif), coalesceBurst: true)
             return
         }
         resizeWithMouseTask?.cancel()

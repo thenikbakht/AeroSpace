@@ -3,14 +3,17 @@ import Common
 
 @MainActor
 private var activeRefreshTask: Task<(), any Error>? = nil
+private let burstCoalescingDelay: Duration = .milliseconds(20)
 
 @MainActor
 func scheduleCancellableCompleteRefreshSession(
     _ event: RefreshSessionEvent,
     optimisticallyPreLayoutWorkspaces: Bool = false,
+    coalesceBurst: Bool = false,
 ) {
     activeRefreshTask?.cancel()
     activeRefreshTask = Task.startUnstructured { @MainActor in
+        if coalesceBurst { try await Task.sleep(for: burstCoalescingDelay) }
         try checkCancellation()
         await runHeavyCompleteRefreshSession(
             event,
@@ -45,7 +48,10 @@ func runHeavyCompleteRefreshSession(
             updateTrayText()
             SecureInputPanel.shared.refresh()
             try await normalizeLayoutReason()
-            if shouldLayoutWorkspaces { try await layoutWorkspaces() }
+            if shouldLayoutWorkspaces {
+                MacApp.forgetAllLastRequestedAxFrames()
+                try await layoutWorkspaces()
+            }
         }
     }
     switch res {
@@ -192,7 +198,8 @@ private func layoutWorkspaces() async throws {
         try await workspace.layoutWorkspace()
     }
     for workspace in Workspace.all where !workspace.isVisible {
-        let corner = monitorToOptimalHideCorner[workspace.workspaceMonitorInfo.rect.topLeftCorner] ?? .bottomRightCorner
+        guard let workspaceMonitorInfo = workspace.nodeMonitorInfo else { continue }
+        let corner = monitorToOptimalHideCorner[workspaceMonitorInfo.rect.topLeftCorner] ?? .bottomRightCorner
         for window in workspace.allLeafWindowsRecursive {
             try await (window as! MacWindow).hideInCorner(corner) // todo as!
         }

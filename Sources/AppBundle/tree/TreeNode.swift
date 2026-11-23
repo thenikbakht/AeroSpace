@@ -18,7 +18,7 @@ open class TreeNode: Equatable, AeroAny {
     // - move-mouse command
     // - focus-follows-mouse
     var lastAppliedLayoutPhysicalRect: Rect? = nil // with real inner gaps
-    final var unboundStacktrace: String? = nil
+    final var unboundStacktrace: RawStacktrace? = nil
     var isBound: Bool { parent != nil } // todo drop, once https://github.com/nikitabobko/AeroSpace/issues/1215 is fixed
 
     @MainActor
@@ -107,7 +107,7 @@ open class TreeNode: Equatable, AeroAny {
         let index = _parent._children.remove(element: self) ?? dieT("Can't find child in its parent")
         check(_parent._mruChildren.remove(self))
         self._parent = nil
-        unboundStacktrace = getStringStacktrace()
+        unboundStacktrace = RawStacktrace()
 
         return BindingData(parent: _parent, adaptiveWeight: adaptiveWeight, index: index)
     }
@@ -130,7 +130,7 @@ open class TreeNode: Equatable, AeroAny {
 
     @discardableResult
     func unbindFromParent() -> BindingData {
-        unbindIfBound() ?? dieT("\(self) is already unbound. The stacktrace where it was unbound:\n\(unboundStacktrace.prettyDescription)")
+        unbindIfBound() ?? dieT("\(self) is already unbound. The stacktrace where it was unbound:\n\((unboundStacktrace?.symbolicated).prettyDescription)")
     }
 
     nonisolated public static func == (lhs: TreeNode, rhs: TreeNode) -> Bool {

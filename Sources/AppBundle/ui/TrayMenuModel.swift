@@ -26,7 +26,8 @@ enum AxPermissionStatus: Equatable {
 @MainActor func updateTrayText() {
     let sortedMonitors = globalSortedMonitorInfos
     let focus = globalFocus
-    TrayMenuModel.shared.trayText = (activeMode?.takeIf { $0 != mainModeId }?.first.map { "(\($0.uppercased())) " } ?? "") +
+    let model = TrayMenuModel.shared
+    let trayText = (activeMode?.takeIf { $0 != mainModeId }?.first.map { "(\($0.uppercased())) " } ?? "") +
         sortedMonitors
         .lazy
         .map {
@@ -35,7 +36,8 @@ enum AxPermissionStatus: Equatable {
             return ($0.visibleWorkspace == focus.workspace && sortedMonitors.count > 1 ? "*" : "") + visibleWorkspaceName
         }
         .joined(separator: " │ ")
-    TrayMenuModel.shared.workspaces = Workspace.all.map {
+    if model.trayText != trayText { model.trayText = trayText }
+    let workspaces = Workspace.all.map {
         let apps = $0.allLeafWindowsRecursive.map { $0.app.name?.takeIf { !$0.isEmpty } }.filterNotNil().toSet()
         let dash = " - "
         let suffix = switch true {
@@ -53,6 +55,7 @@ enum AxPermissionStatus: Equatable {
             hasFullscreenWindows: hasFullscreenWindows,
         )
     }
+    if model.workspaces != workspaces { model.workspaces = workspaces }
     var items = sortedMonitors.map {
         let hasFullscreenWindows = $0.visibleWorkspace.allLeafWindowsRecursive.contains { $0.isFullscreen }
         return TrayItem(
@@ -68,7 +71,7 @@ enum AxPermissionStatus: Equatable {
     if let mode {
         items.insert(mode, at: 0)
     }
-    TrayMenuModel.shared.trayItems = items
+    if model.trayItems != items { model.trayItems = items }
 }
 
 struct WorkspaceViewModel: Hashable {
