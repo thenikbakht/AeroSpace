@@ -18,8 +18,6 @@ open class TreeNode: Equatable, AeroAny {
     // - move-mouse command
     // - focus-follows-mouse
     var lastAppliedLayoutPhysicalRect: Rect? = nil // with real inner gaps
-    // Symbolication is expensive, and unbinding is a hot path. That's why we only remember raw return addresses, and
-    // symbolicate them lazily when we are about to die
     final var unboundStacktrace: RawStacktrace? = nil
     var isBound: Bool { parent != nil } // todo drop, once https://github.com/nikitabobko/AeroSpace/issues/1215 is fixed
 

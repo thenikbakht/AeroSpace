@@ -16,9 +16,6 @@ final class MacApp: AbstractApp {
     var lastFocusedNativeWindowOpaqueId: OpaqueWindowId? = nil
     private var thread: Thread?
     private var setFrameJobs: [OpaqueWindowId: RunLoopJob] = [:]
-    // Performance optimization. The last frame that we asked the window to take. Allows to skip AX requests if the
-    // window is asked to take the same frame again (which is what happens for the most of the windows on every layout)
-    // The cache must be invalidated every time when the window might have changed its frame without us asking
     private var lastRequestedAxFrames: [OpaqueWindowId: RequestedAxFrame] = [:]
     // Never pruned: while the screen is locked, AX reports windows as gone, and closedWindowsCache matches
     // the windows re-detected after unlock by their OpaqueWindowId
@@ -176,7 +173,6 @@ final class MacApp: AbstractApp {
                 try setFrame(window, topLeft, size, job)
             }
             if !isSuccess {
-                // The window didn't take the frame. Make sure that we retry on the next layout
                 Task.startUnstructured { @MainActor in
                     guard let app = MacApp.allAppsMap[pid] else { return }
                     if app.lastRequestedAxFrames[windowId] == frame { app.forgetLastRequestedAxFrame(windowId) }
@@ -184,10 +180,9 @@ final class MacApp: AbstractApp {
             }
         }
         setFrameJobs[windowId] = job
-        if job.isCancelled { lastRequestedAxFrames.removeValue(forKey: windowId) } // The job wasn't even submitted
+        if job.isCancelled { lastRequestedAxFrames.removeValue(forKey: windowId) }
     }
 
-    /// Must be called every time when the window might have changed its frame without us asking
     func forgetLastRequestedAxFrame(_ windowId: OpaqueWindowId) {
         lastRequestedAxFrames.removeValue(forKey: windowId)
     }
@@ -509,7 +504,6 @@ private struct RequestedAxFrame: Equatable, Sendable {
     let size: CGSize?
 }
 
-/// Returns false if at least one of AX requests failed
 private func setFrame(_ window: AXUIElement, _ topLeft: CGPoint?, _ size: CGSize?, _ job: RunLoopJob) throws -> Bool {
     var isSuccess = true
     // Set size and then the position. The order is important https://github.com/nikitabobko/AeroSpace/issues/143

@@ -26,8 +26,6 @@ enum AxPermissionStatus: Equatable {
 @MainActor func updateTrayText() {
     let sortedMonitors = globalSortedMonitorInfos
     let focus = globalFocus
-    // Performance optimization. Assign @Published properties only if the value has changed. Every assignment makes
-    // SwiftUI re-evaluate MenuBarLabel, which rasterizes the menu bar image on the main thread
     let model = TrayMenuModel.shared
     let trayText = (activeMode?.takeIf { $0 != mainModeId }?.first.map { "(\($0.uppercased())) " } ?? "") +
         sortedMonitors

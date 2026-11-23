@@ -13,8 +13,6 @@ func scheduleCancellableCompleteRefreshSession(
 ) {
     activeRefreshTask?.cancel()
     activeRefreshTask = Task.startUnstructured { @MainActor in
-        // Events that come in bursts (e.g. every window that we move during workspace switch reports that it was moved)
-        // would otherwise start a session per event, only to cancel it on the next event several milliseconds later
         if coalesceBurst { try await Task.sleep(for: burstCoalescingDelay) }
         try checkCancellation()
         await runHeavyCompleteRefreshSession(
@@ -51,7 +49,6 @@ func runHeavyCompleteRefreshSession(
             SecureInputPanel.shared.refresh()
             try await normalizeLayoutReason()
             if shouldLayoutWorkspaces {
-                // The heavy session is the self-healing mechanism: it unconditionally re-applies frames to all windows
                 MacApp.forgetAllLastRequestedAxFrames()
                 try await layoutWorkspaces()
             }

@@ -112,7 +112,6 @@ public func throwT<T, E: Error>(_ error: E) throws(E) -> T { throw error }
 
 public func getStringStacktrace() -> String { Thread.callStackSymbols.joined(separator: "\n") }
 
-/// Cheap to capture alternative to `getStringStacktrace`. The symbolication is postponed until `symbolicated` is called
 public struct RawStacktrace: Sendable {
     private let returnAddresses: [UInt]
 
